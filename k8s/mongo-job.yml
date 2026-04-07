@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-init
+  namespace: project3
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mongo-init
+          image: mongo:7
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "⏳ Waiting for MongoDB pods..."
+
+              until mongosh --host mongo-statefulset-0.mongo:27017 --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+                echo "Waiting for mongo-statefulset-0..."
+                sleep 3
+              done
+
+              until mongosh --host mongo-statefulset-1.mongo:27017 --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+                echo "Waiting for mongo-statefulset-1..."
+                sleep 3
+              done
+
+              echo "✅ MongoDB pods ready. Initializing replica set..."
+
+              mongosh --host mongo-statefulset-0.mongo:27017 --eval '
+                const config = {
+                  _id: "rs0",
+                  members: [
+                    { _id: 0, host: "mongo-statefulset-0.mongo:27017" },
+                    { _id: 1, host: "mongo-statefulset-1.mongo:27017" }
+                  ]
+                };
+
+                try {
+                  rs.status();
+                  print("Replica set already initialized.");
+                } catch (e) {
+                  print("Initializing replica set...");
+                  rs.initiate(config);
+                }
+              '
+
+              echo "✅ Replica set initialization completed."
